@@ -1,0 +1,11 @@
+[workspace]
+
+resolver = "3"
+members = [
+   "redshell",
+   "redshell_macros",
+]
+
+[patch.crates-io]
+redshell_macros = { path = "redshell_macros" }
+
