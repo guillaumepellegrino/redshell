@@ -23,7 +23,7 @@ Now, can we pipe and orchestrate commands in Rust ? Yes, but the standard API is
 - A variable can not be expanded to multiple arguments or to another command. Shell injection should not be possible.
 
 # Syntax
-Special characters are `'`, ` `, `\\t`, `{}`, `>`, `<`, `>>`.
+Special characters are `'`, ` `, `\t`, `{}`, `>`, `<`, `>>`.
 
 Create a simple command:
 ```

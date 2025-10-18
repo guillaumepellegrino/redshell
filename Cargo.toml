@@ -8,4 +8,5 @@ members = [
 
 [patch.crates-io]
 redshell_macros = { path = "redshell_macros" }
+redshell = { path = "redshell" }
 

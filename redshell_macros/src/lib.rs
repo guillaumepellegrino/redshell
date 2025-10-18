@@ -3,13 +3,20 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, LitStr};
 
+#[derive(Debug, Copy, Clone)]
+enum Redirection {
+    Write(i32),
+    Append(i32),
+    Read(i32),
+}
+
 #[derive(Default)]
 struct ParserCmd {
     args: Vec<String>,
-    redirections: Vec<(i32, String)>,
+    redirections: Vec<(Redirection, String)>,
     word: String,
     is_quoted: bool,
-    redirect_fd: Option<i32>,
+    redirect_fd: Option<Redirection>,
     format_word: bool,
 }
 
@@ -60,12 +67,22 @@ impl ParserCmd {
                 }
                 else {
                     if self.word.is_empty() {
-                        self.redirect_fd = Some(1);
+                        self.redirect_fd = if token == '>' {
+                            Some(Redirection::Write(1))
+                        }
+                        else {
+                            Some(Redirection::Read(0))
+                        }
                     }
                     else {
                         let fd : i32 = self.word.parse()
                             .expect("'>' must be preceded by the file descriptor number");
-                        self.redirect_fd = Some(fd);
+                        self.redirect_fd = if token == '>' {
+                            Some(Redirection::Write(fd))
+                        }
+                        else {
+                            Some(Redirection::Read(fd))
+                        }
                     }
                     self.word.clear();
                 }
@@ -96,8 +113,13 @@ impl ParserCmd {
         for arg in args {
             source_code += &format!("cmd.arg({arg});");
         }
-        for (fd, filename) in &self.redirections {
-            source_code += &format!("cmd.redirect({fd}, {filename});");
+        for (redirection, filename) in &self.redirections {
+            let (fd, mode) = match redirection {
+                Redirection::Read(fd) => (fd, "redshell::Redirection::Read"),
+                Redirection::Write(fd) => (fd, "redshell::Redirection::Write"),
+                Redirection::Append(fd) => (fd, "redshell::Redirection::Append"),
+            };
+            source_code += &format!("cmd.redirect({fd}, {filename}, {mode});");
         }
         source_code += "cmd}";
         println!("cmd.source={source_code}");
@@ -178,6 +200,13 @@ mod tests {
 
         let source_code = parse_cmd_expression("make -C {dir}/{subdir} {target}");
         let expected = "{let mut cmd = std::process::Command::new(\"make\");cmd.arg(\"-C\");cmd.arg(format!(\"{dir}/{subdir}\"));cmd.arg(format!(\"{target}\"));cmd}";
+        assert_eq!(source_code, expected);
+    }
+
+    #[test]
+    fn test_redirection() {
+        let source_code = parse_cmd_expression("dd if={input} >{output}");
+        let expected = "{let mut cmd = std::process::Command::new(\"dd\");cmd.arg(format!(\"if={input}\"));cmd.redirect(1, format!(\"{output}\"), redshell::Redirection::Write);cmd}";
         assert_eq!(source_code, expected);
     }
 

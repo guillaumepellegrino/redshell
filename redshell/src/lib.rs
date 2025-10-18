@@ -46,8 +46,22 @@ macro_rules! exec {
     };
 }
 
+pub enum Redirection {
+    /// Redirect fd's output to specified file in Write mode.
+    /// If the file does not exist, it is created.
+    /// Otherwise, it is truncated to 0
+    Write,
+
+    /// Redirect fd's output to specified file in Append mode.
+    /// If the file does not exist, it is created.
+    Append,
+
+    /// Redirect fd's input to specified file in Read mode.
+    Read,
+}
+
 pub trait CommandExt {
-    fn redirect<S: AsRef<Path>>(&mut self, fd: i32, file: S);
+    fn redirect<S: AsRef<Path>>(&mut self, fd: i32, file: S, redirection: Redirection);
 }
 
 pub struct CommandInfo {
@@ -69,11 +83,8 @@ pub struct WrPipe {
 impl CommandExt for Command {
     /**
      * Open file with the specified path at the specified fd.
-     * FIXME:
-     *   -read/write => should be configurable
-     *   -truncate => should be configurable
      */
-    fn redirect<S: AsRef<Path>>(&mut self, fd: i32, path: S) {
+    fn redirect<S: AsRef<Path>>(&mut self, fd: i32, path: S, redirection: Redirection) {
         use std::os::unix::process::CommandExt;
 
         // we need a deep-copy to share this variable with pre_exec()
@@ -82,19 +93,34 @@ impl CommandExt for Command {
             eprintln!("pre_exec(Redirect {:?} to {fd})", path);
             self.pre_exec(move || {
                 eprintln!("Redirect {path:?} to {fd}");
-                let Ok(file) = std::fs::OpenOptions::new()
-                    //.write(false)
-                    //.create_new(true)
-                    //.truncate(true)
-                    .open(&path)
-                else {
-                    eprintln!("Failed to open {:?}", path);
-                    return Ok(());
+
+                let mut options = std::fs::OpenOptions::new();
+                let file = match redirection {
+                    Redirection::Write => {
+                        options.write(true).read(false).truncate(true)
+                    },
+                    Redirection::Append => {
+                        options.write(true).read(false).append(true)
+                    },
+                    Redirection::Read => {
+                        options.write(false).read(true)
+                    },
+                }.open(&path);
+                let file = match file {
+                    Ok(file) => file,
+                    Err(e) => {
+                        eprintln!("Failed to open {:?}: {e}", path);
+                        return Ok(());
+                    },
                 };
 
-                if let Err(e) = nix::unistd::dup2_raw(file, fd) {
-                    panic!("Failed to redirect {path:?} to {fd}: {e}");
-                }
+                match nix::unistd::dup2_raw(file, fd) {
+                    Ok(newfd) => {
+                        let newfd = newfd.into_raw_fd();
+                        eprintln!("newfd = {newfd}");
+                    },
+                    Err(e) => panic!("Failed to redirect {path:?} to {fd}: {e}"),
+                };
 
                 Ok(())
             });
@@ -287,13 +313,31 @@ mod tests {
         assert_eq!(output.read_string(), content);
     }
 
+
     #[test]
-    fn test_redirection() {
+    fn test_redirection1() {
+        let content = "Hello World !";
+        let input = redshell::MemoryFile::from(content);
+        let mut output = redshell::MemoryFile::new();
+        let mut cmd = cmd!("dd if={input}");
+        let outfile = format!("{output}");
+        cmd.redirect(1, outfile, redshell::Redirection::Write);
+        eprintln!("cmd={cmd:?}");
+        let status = cmd.status().unwrap();
+
+        assert_eq!(status.code(), Some(0));
+        assert_eq!(output.read_string(), content);
+    }
+
+    #[test]
+    fn test_redirection_cmd() {
         let content = "Hello World !";
         let input = redshell::MemoryFile::from(content);
         let mut output = redshell::MemoryFile::new();
         let mut cmd = cmd!("dd if={input} >{output}");
+        eprintln!("cmd={cmd:?}");
         let status = cmd.status().unwrap();
+
 
         assert_eq!(status.code(), Some(0));
         assert_eq!(output.read_string(), content);

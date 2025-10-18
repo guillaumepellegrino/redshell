@@ -7,4 +7,5 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
+logos = "0.15.1"
 syn = "2.0.106"
